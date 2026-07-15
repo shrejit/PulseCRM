@@ -2,10 +2,17 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const morgan = require("morgan");
+const swaggerUi = require("swagger-ui-express");
 
 dotenv.config();
 
+const swaggerSpec = require("./config/swagger");
+
 const authRoutes = require("./routes/auth.routes");
+const companyRoutes = require("./routes/company.routes");
+const teamRoutes = require("./routes/team.routes");
+const userRoutes = require("./routes/user.routes");
+const invitationRoutes = require("./routes/invitation.routes");
 
 const app = express();
 
@@ -28,8 +35,18 @@ app.get("/api/test", (req, res) => {
   });
 });
 
+// API Documentation
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get("/api-docs.json", (req, res) => res.json(swaggerSpec));
+
 // Authentication Routes
 app.use("/api/auth", authRoutes);
+
+// Organization Routes
+app.use("/api/companies", companyRoutes);
+app.use("/api/teams", teamRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/invitations", invitationRoutes);
 
 // 404
 app.use((req, res) => {
@@ -43,7 +60,7 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error(err);
 
-  res.status(err.status || 500).json({
+  res.status(err.status || err.statusCode || 500).json({
     success: false,
     message: err.message || "Internal Server Error",
   });

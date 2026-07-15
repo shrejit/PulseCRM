@@ -2,11 +2,8 @@ const crypto = require("crypto");
 
 const prisma = require("../prisma/client");
 const { hashPassword, comparePassword } = require("../utils/bcrypt");
-const {
-  generateAccessToken,
-  generateRefreshToken,
-  verifyRefreshToken,
-} = require("../utils/jwt");
+const { sendEmail } = require("../utils/email");
+const refreshTokenService = require("./refreshToken.service");
 
 // Register
 const register = async (data) => {
@@ -15,11 +12,25 @@ const register = async (data) => {
     email,
     password,
     companyId,
+    companyName,
     teamId = null,
-    role = "REP",
+    role,
   } = data;
 
-  if (!name || !email || !password || !companyId) {
+  let resolvedCompanyId = companyId;
+  let resolvedRole = role || "REP";
+
+  if (!resolvedCompanyId && companyName) {
+    const newCompany = await prisma.company.create({
+      data: {
+        name: companyName,
+      },
+    });
+    resolvedCompanyId = newCompany.id;
+    resolvedRole = role || "ADMIN";
+  }
+
+  if (!name || !email || !password || !resolvedCompanyId) {
     throw new Error("Missing required fields");
   }
 
@@ -42,31 +53,34 @@ const register = async (data) => {
       name,
       email,
       password: hashedPassword,
-      role,
-      companyId,
+      role: resolvedRole,
+      companyId: resolvedCompanyId,
       teamId,
       emailVerificationToken,
     },
   });
 
-  const accessToken = generateAccessToken({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-  });
+  const { accessToken, refreshToken } = await refreshTokenService.issueTokenPair(user);
 
-  const refreshToken = generateRefreshToken({
-    id: user.id,
-  });
-
-  await prisma.user.update({
-    where: {
-      id: user.id,
-    },
-    data: {
-      refreshToken,
-    },
-  });
+  // Send email verification asynchronously
+  const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+  const verifyUrl = `${clientUrl}/verify-email/${emailVerificationToken}`;
+  const htmlContent = `
+    <div style="font-family: sans-serif; padding: 20px; color: #333;">
+      <h2>Welcome to PulseCRM!</h2>
+      <p>Thank you for registering. Please verify your email address to get started:</p>
+      <p style="margin: 20px 0;">
+        <a href="${verifyUrl}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Verify Email Address</a>
+      </p>
+      <p>Or copy this link to your browser:</p>
+      <p>${verifyUrl}</p>
+    </div>
+  `;
+  sendEmail({
+    to: user.email,
+    subject: "Verify your PulseCRM Account",
+    html: htmlContent,
+  }).catch(err => console.error("Error sending verification email:", err.message));
 
   return {
     user: {
@@ -92,6 +106,10 @@ const login = async ({ email, password }) => {
     throw new Error("Invalid credentials");
   }
 
+  if (!user.isActive) {
+    throw new Error("Account is inactive");
+  }
+
   const validPassword = await comparePassword(
     password,
     user.password
@@ -101,24 +119,7 @@ const login = async ({ email, password }) => {
     throw new Error("Invalid credentials");
   }
 
-  const accessToken = generateAccessToken({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-  });
-
-  const refreshToken = generateRefreshToken({
-    id: user.id,
-  });
-
-  await prisma.user.update({
-    where: {
-      id: user.id,
-    },
-    data: {
-      refreshToken,
-    },
-  });
+  const { accessToken, refreshToken } = await refreshTokenService.issueTokenPair(user);
 
   return {
     user: {
@@ -132,31 +133,42 @@ const login = async ({ email, password }) => {
   };
 };
 
-// Logout
-const logout = async ({ userId }) => {
-  await prisma.user.update({
-    where: {
-      id: userId,
-    },
-    data: {
-      refreshToken: null,
-    },
-  });
+// Logout — revokes the presented refresh token (current session). Falls
+// back to revoking every session for the user if no refresh token is
+// supplied, so an authenticated client can always guarantee it is logged
+// out even if it lost track of its refresh token.
+const logout = async ({ userId, refreshToken }) => {
+  if (refreshToken) {
+    await refreshTokenService.revokeToken(refreshToken);
+  } else {
+    await refreshTokenService.revokeAllForUser(userId);
+  }
 
   return true;
 };
 
-// Refresh Token
+// Refresh Token — rotation with reuse detection is implemented in
+// refreshToken.service.js.
 const refreshToken = async ({ refreshToken }) => {
-  if (!refreshToken) {
-    throw new Error("Refresh token required");
-  }
+  return refreshTokenService.rotateRefreshToken(refreshToken);
+};
 
-  const payload = verifyRefreshToken(refreshToken);
-
+// Get the currently authenticated user's profile (used by GET /me).
+const getMe = async (userId) => {
   const user = await prisma.user.findUnique({
-    where: {
-      id: payload.id,
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isActive: true,
+      emailVerified: true,
+      createdAt: true,
+      companyId: true,
+      teamId: true,
+      company: { select: { id: true, name: true } },
+      team: { select: { id: true, name: true } },
     },
   });
 
@@ -164,19 +176,7 @@ const refreshToken = async ({ refreshToken }) => {
     throw new Error("User not found");
   }
 
-  if (user.refreshToken !== refreshToken) {
-    throw new Error("Invalid refresh token");
-  }
-
-  const newAccessToken = generateAccessToken({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-  });
-
-  return {
-    accessToken: newAccessToken,
-  };
+  return user;
 };
 
 // Forgot Password
@@ -202,6 +202,27 @@ const forgotPassword = async ({ email }) => {
       resetPasswordExpires: new Date(Date.now() + 3600000),
     },
   });
+
+  // Send password reset email asynchronously
+  const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+  const resetUrl = `${clientUrl}/reset-password/${token}`;
+  const htmlContent = `
+    <div style="font-family: sans-serif; padding: 20px; color: #333;">
+      <h2>Reset Password Request</h2>
+      <p>You requested a password reset for your PulseCRM account. Click the button below to set a new password:</p>
+      <p style="margin: 20px 0;">
+        <a href="${resetUrl}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset Password</a>
+      </p>
+      <p>This link is valid for 1 hour. If you didn't make this request, you can ignore this email.</p>
+      <p>Or copy this link to your browser:</p>
+      <p>${resetUrl}</p>
+    </div>
+  `;
+  sendEmail({
+    to: user.email,
+    subject: "Reset your PulseCRM Password",
+    html: htmlContent,
+  }).catch(err => console.error("Error sending reset email:", err.message));
 
   return token;
 };
@@ -234,6 +255,9 @@ const resetPassword = async (token, { password }) => {
       resetPasswordExpires: null,
     },
   });
+
+  // Resetting the password invalidates every existing session.
+  await refreshTokenService.revokeAllForUser(user.id);
 
   return true;
 };
@@ -268,6 +292,7 @@ module.exports = {
   login,
   logout,
   refreshToken,
+  getMe,
   forgotPassword,
   resetPassword,
   verifyEmail,

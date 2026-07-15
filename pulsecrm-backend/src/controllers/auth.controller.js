@@ -36,10 +36,15 @@ const login = async (req, res) => {
   }
 };
 
-// Logout
+// Logout — requires authentication. Revokes the refresh token supplied in
+// the body (current session) or, if none is supplied, every session
+// belonging to the authenticated user.
 const logout = async (req, res) => {
   try {
-    await authService.logout(req.body);
+    await authService.logout({
+      userId: req.user.id,
+      refreshToken: req.body.refreshToken,
+    });
 
     return res.status(200).json({
       success: true,
@@ -56,7 +61,9 @@ const logout = async (req, res) => {
 // Refresh Token
 const refreshToken = async (req, res) => {
   try {
-    const result = await authService.refreshToken(req.body);
+    const result = await authService.refreshToken({
+      refreshToken: req.body.refreshToken,
+    });
 
     return res.status(200).json({
       success: true,
@@ -64,6 +71,23 @@ const refreshToken = async (req, res) => {
     });
   } catch (error) {
     return res.status(401).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Current authenticated user — requires authentication.
+const getMe = async (req, res) => {
+  try {
+    const user = await authService.getMe(req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    return res.status(404).json({
       success: false,
       message: error.message,
     });
@@ -126,6 +150,7 @@ module.exports = {
   login,
   logout,
   refreshToken,
+  getMe,
   forgotPassword,
   resetPassword,
   verifyEmail,

@@ -1,16 +1,53 @@
-# React + Vite
+# pulsecrm-frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite + Tailwind CSS frontend for PulseCRM.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+cp .env.example .env     # set VITE_API_URL to your backend's URL
+npm run dev               # http://localhost:5173
+```
 
-## React Compiler
+## Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React 19 + Vite + React Router
+- Redux Toolkit for authentication state (`src/features/auth`)
+- Tailwind CSS (design tokens in `tailwind.config.js` — see `pulsecrm-backend`'s
+  sibling design system for the color/spacing/typography source of truth)
+- `lucide-react` for icons
 
-## Expanding the ESLint configuration
+## Structure
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```
+src/
+├── api/api.js              Axios instance (base URL, auth header injection)
+├── features/auth/           authSlice — login/logout/loading state
+├── hooks/useAuth.js          Convenience hook over the Redux auth state
+├── store/store.js             Redux store setup
+├── components/
+│   ├── Navbar.jsx               Top bar (search, notifications, user menu)
+│   ├── Sidebar.jsx               Left nav + logout
+│   ├── Loader.jsx                Reusable loading spinner
+│   └── ProtectedRoute.jsx         Redirects to /login if not authenticated
+└── pages/
+    ├── Login.jsx / Register.jsx
+    ├── ForgotPassword.jsx / ResetPassword.jsx
+    ├── VerifyEmail.jsx
+    └── Dashboard.jsx
+```
+
+## Talking to the backend
+
+`src/api/api.js` reads `VITE_API_URL` and attaches the stored access token
+to every request. See `pulsecrm-backend/README.md` for the full API map —
+every endpoint documented there (Company/Team/User/Invitation) is ready to
+be wired into new pages; only Auth + Dashboard are built so far.
+
+## Known gap
+
+`Sidebar.jsx` currently links to `/contacts`, `/leads`, `/deals`, `/tasks`,
+`/company`, and `/settings`, but only `/dashboard` is registered as a route
+in `App.jsx` today. Those are the next pages to build, backed by the
+already-implemented Company/Team/User/Invitation APIs.

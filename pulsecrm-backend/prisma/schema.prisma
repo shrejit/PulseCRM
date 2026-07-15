@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../generated/prisma"
 }
 
@@ -34,6 +34,13 @@ enum TaskStatus {
   COMPLETED
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
 model Company {
   id        String   @id @default(cuid())
   name      String
@@ -41,13 +48,14 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  teams    Team[]
-  users    User[]
-  contacts Contact[]
-  leads    Lead[]
-  deals    Deal[]
-  tasks    Task[]
-  notes    Note[]
+  teams       Team[]
+  users       User[]
+  contacts    Contact[]
+  leads       Lead[]
+  deals       Deal[]
+  tasks       Task[]
+  notes       Note[]
+  invitations Invitation[]
 }
 
 model Team {
@@ -59,7 +67,8 @@ model Team {
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
 
-  users User[]
+  users       User[]
+  invitations Invitation[]
 }
 
 model User {
@@ -72,7 +81,6 @@ model User {
   // Authentication
   emailVerified          Boolean   @default(false)
   emailVerificationToken String?   @unique
-  refreshToken           String?
   resetPasswordToken     String?   @unique
   resetPasswordExpires   DateTime?
 
@@ -88,11 +96,59 @@ model User {
   teamId String?
   team   Team?   @relation(fields: [teamId], references: [id])
 
-  contacts Contact[]
-  leads    Lead[]
-  deals    Deal[]
-  tasks    Task[]
-  notes    Note[]
+  contacts        Contact[]
+  leads           Lead[]
+  deals           Deal[]
+  tasks           Task[]
+  notes           Note[]
+  refreshTokens   RefreshToken[]
+  sentInvitations Invitation[]   @relation("InvitedBy")
+}
+
+// Refresh tokens are stored hashed, never in plaintext.
+// `family` groups every token descended from a single login/registration
+// event so that reuse of a revoked token can invalidate the whole chain.
+model RefreshToken {
+  id                  String    @id @default(cuid())
+  tokenHash           String    @unique
+  family              String
+  expiresAt           DateTime
+  revoked             Boolean   @default(false)
+  revokedAt           DateTime?
+  replacedByTokenHash String?
+  createdAt           DateTime  @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([family])
+}
+
+// Invitation tokens are separate from email-verification tokens:
+// they represent an invite to join a Company/Team with a specific role,
+// not a claim over an existing account's email address.
+model Invitation {
+  id        String           @id @default(cuid())
+  email     String
+  role      UserRole
+  token     String           @unique
+  status    InvitationStatus @default(PENDING)
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id])
+
+  invitedById String
+  invitedBy   User   @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([companyId])
+  @@index([email])
 }
 
 model Contact {

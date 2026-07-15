@@ -1,26 +1,57 @@
-import { useEffect, useState } from "react";
-import api from "./api/api";
+import { Routes, Route, Navigate } from "react-router-dom";
 
-function App() {
-  const [message, setMessage] = useState("");
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import VerifyEmail from "./pages/VerifyEmail";
+import Dashboard from "./pages/Dashboard";
 
-  useEffect(() => {
-    api
-      .get("/api/test")
-      .then((response) => {
-        setMessage(response.data.message);
-      })
-      .catch((error) => {
-        console.error("API Error:", error);
-      });
-  }, []);
+import ProtectedRoute from "./components/ProtectedRoute";
 
+export default function App() {
   return (
-    <div style={{ padding: "40px", fontFamily: "Arial" }}>
-      <h1>PulseCRM</h1>
-      <p>{message}</p>
-    </div>
+    <Routes>
+
+      <Route
+        path="/"
+        element={<Navigate to="/login" replace />}
+      />
+
+      <Route
+        path="/login"
+        element={<Login />}
+      />
+
+      <Route
+        path="/register"
+        element={<Register />}
+      />
+
+      <Route
+        path="/forgot-password"
+        element={<ForgotPassword />}
+      />
+
+      <Route
+        path="/reset-password/:token"
+        element={<ResetPassword />}
+      />
+
+      <Route
+        path="/verify-email/:token"
+        element={<VerifyEmail />}
+      />
+
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+
+    </Routes>
   );
 }
-
-export default App;
